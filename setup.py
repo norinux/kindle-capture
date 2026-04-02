@@ -23,7 +23,9 @@ OPTIONS = {
     "packages": ["PyQt6"],
     "includes": [
         "PIL",
+        "PIL.PdfImagePlugin",
         "Quartz",
+        "AppKit",
     ],
 }
 
