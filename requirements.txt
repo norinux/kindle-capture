@@ -1,0 +1,5 @@
+pillow==12.1.1
+pyobjc-framework-Quartz==12.1
+PyQt6==6.11.0
+PyQt6-Qt6==6.11.0
+PyQt6_sip==13.11.1
