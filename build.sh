@@ -41,14 +41,15 @@ if [ "$1" = "--setup" ]; then
         2>/dev/null
 
     echo "PKCS12 に変換中..."
+    P12_PASS=$(openssl rand -base64 16)
     openssl pkcs12 -export -inkey "$KEY_FILE" -in "$CERT_FILE" \
-        -out "$P12_FILE" -passout pass:temppass123 -legacy 2>/dev/null || \
+        -out "$P12_FILE" -passout "pass:${P12_PASS}" -legacy 2>/dev/null || \
     openssl pkcs12 -export -inkey "$KEY_FILE" -in "$CERT_FILE" \
-        -out "$P12_FILE" -passout pass:temppass123 2>/dev/null
+        -out "$P12_FILE" -passout "pass:${P12_PASS}" 2>/dev/null
 
     echo "キーチェーンにインポート中..."
     security import "$P12_FILE" -k ~/Library/Keychains/login.keychain-db \
-        -T /usr/bin/codesign -P "temppass123" -A
+        -T /usr/bin/codesign -P "${P12_PASS}" -A
 
     echo "証明書を信頼設定中..."
     security add-trusted-cert -d -r trustRoot \
