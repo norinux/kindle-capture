@@ -52,6 +52,30 @@ def _excepthook(exc_type, exc_value, exc_tb):
 sys.excepthook = _excepthook
 
 
+def _slot_safe(func):
+    """PyQt6 スロットを try/except でラップするデコレータ。
+
+    PyQt6 ではスロット内の未処理例外が pyqt6_err_print() → qFatal() → abort() を
+    引き起こし、プロセスが SIGABRT で即死する。sys.excepthook では防げないため、
+    各スロットを明示的に保護する必要がある。
+    """
+    from functools import wraps
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
+            sys.stderr.write(msg)
+            try:
+                QMessageBox.critical(None, "エラー", f"予期しないエラーが発生しました:\n\n{e}")
+            except Exception:
+                pass
+
+    return wrapper
+
+
 # ── 権限チェック ──────────────────────────────────────────────
 
 
@@ -217,9 +241,28 @@ class CaptureWorker(QThread):
         self.out_dir = Path(out_dir)
         self.output_pdf = Path(output_pdf)
         self._stop_requested = False
+        self._finalize_requested = False
 
     def stop(self):
         self._stop_requested = True
+
+    def finalize(self):
+        """キャプチャを中断し、取得済みページでPDFを生成する"""
+        self._finalize_requested = True
+        self._stop_requested = True
+
+    def _do_finalize(self, captured_count):
+        """取得済みページからPDFを生成する"""
+        self.progress.emit(captured_count, captured_count, "途中までのページをPDF変換中...")
+        # 一時ファイル削除
+        tmp_path = self.out_dir / "_check.png"
+        tmp_path.unlink(missing_ok=True)
+
+        count = pngs_to_pdf(self.out_dir, self.output_pdf)
+        if count == 0:
+            self.error.emit("PNG ファイルが見つかりません。")
+        else:
+            self.completed.emit(f"完了! {count} ページ → {self.output_pdf.name}（途中でPDF化）")
 
     def run(self):
         try:
@@ -248,8 +291,12 @@ class CaptureWorker(QThread):
             # ── 2ページ目以降: 送り → 変更待ち → 安定待ち → キャプチャ ──
             for i in range(self.start_page + 1, self.pages + 1):
                 if self._stop_requested:
-                    self.progress.emit(0, 0, "中断しました")
-                    self.completed.emit(f"中断しました（{i - self.start_page} ページキャプチャ済み）")
+                    captured_count = i - self.start_page
+                    if self._finalize_requested and captured_count > 0:
+                        self._do_finalize(captured_count)
+                    else:
+                        self.progress.emit(0, 0, "中断しました")
+                        self.completed.emit(f"中断しました（{captured_count} ページキャプチャ済み）")
                     return
 
                 page_num = i - self.start_page + 1
@@ -415,6 +462,18 @@ class MainWindow(QMainWindow):
         self.btn_start.clicked.connect(self.start_capture)
         btn_layout.addWidget(self.btn_start)
 
+        self.btn_finalize = QPushButton("📄 途中でPDF化")
+        self.btn_finalize.setFixedHeight(40)
+        self.btn_finalize.setFont(QFont(".AppleSystemUIFont", 14))
+        self.btn_finalize.setStyleSheet(
+            "QPushButton { background-color: #FF9500; color: white; border-radius: 8px; }"
+            "QPushButton:hover { background-color: #E08600; }"
+            "QPushButton:disabled { background-color: #ccc; }"
+        )
+        self.btn_finalize.setEnabled(False)
+        self.btn_finalize.clicked.connect(self.finalize_capture)
+        btn_layout.addWidget(self.btn_finalize)
+
         self.btn_stop = QPushButton("■ 停止")
         self.btn_stop.setFixedHeight(40)
         self.btn_stop.setFont(QFont(".AppleSystemUIFont", 14))
@@ -449,93 +508,107 @@ class MainWindow(QMainWindow):
             self.label_status.setText("準備完了")
             self.label_status.setStyleSheet("")
 
+    @_slot_safe
     def browse_output(self):
         d = QFileDialog.getExistingDirectory(self, "保存先を選択", self.label_outdir.text())
         if d:
             self.label_outdir.setText(d)
 
+    @_slot_safe
     def detect_kindle(self):
         try:
             win = find_kindle_window()
-            if win:
-                self.label_kindle.setText(
-                    f"検出済み: {win['width']}x{win['height']}  \"{win['name']}\""
-                )
-                self.label_kindle.setStyleSheet("color: #34C759;")
-            else:
-                self.label_kindle.setText("未検出 — Kindle を起動して本を開いてください")
-                self.label_kindle.setStyleSheet("color: #FF3B30;")
         except Exception as e:
             self.label_kindle.setText(f"検出エラー: {e}")
             self.label_kindle.setStyleSheet("color: #FF3B30;")
+            return
+        if win:
+            self.label_kindle.setText(
+                f"検出済み: {win['width']}x{win['height']}  \"{win['name']}\""
+            )
+            self.label_kindle.setStyleSheet("color: #34C759;")
+        else:
+            self.label_kindle.setText("未検出 — Kindle を起動して本を開いてください")
+            self.label_kindle.setStyleSheet("color: #FF3B30;")
 
+    @_slot_safe
     def start_capture(self):
-        try:
-            pages = self.spin_pages.value()
-            start = self.spin_start.value()
-            direction = "right" if self.combo_direction.currentIndex() == 0 else "left"
-            delay = self.spin_delay.value()
+        pages = self.spin_pages.value()
+        start = self.spin_start.value()
+        direction = "right" if self.combo_direction.currentIndex() == 0 else "left"
+        delay = self.spin_delay.value()
 
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            out_dir = Path(self.label_outdir.text()) / f"kindle_capture_{timestamp}"
-            output_pdf = out_dir / f"kindle_{timestamp}.pdf"
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        out_dir = Path(self.label_outdir.text()) / f"kindle_capture_{timestamp}"
+        output_pdf = out_dir / f"kindle_{timestamp}.pdf"
 
-            self.btn_start.setEnabled(False)
-            self.btn_stop.setEnabled(True)
-            self.progress_bar.setMaximum(pages - start + 1)
-            self.progress_bar.setValue(0)
+        self.btn_start.setEnabled(False)
+        self.btn_finalize.setEnabled(True)
+        self.btn_stop.setEnabled(True)
+        self.progress_bar.setMaximum(pages - start + 1)
+        self.progress_bar.setValue(0)
 
-            self.worker = CaptureWorker(pages, start, direction, delay, out_dir, output_pdf)
-            self.worker.progress.connect(self.on_progress)
-            self.worker.completed.connect(self.on_completed)
-            self.worker.error.connect(self.on_error)
-            self.worker.preview.connect(self.on_preview)
-            self.worker.finished.connect(self._cleanup_worker)  # QThread.finished: run()終了後
-            self.worker.start()
-        except Exception as e:
-            self.btn_start.setEnabled(True)
+        self.worker = CaptureWorker(pages, start, direction, delay, out_dir, output_pdf)
+        self.worker.progress.connect(self.on_progress)
+        self.worker.completed.connect(self.on_completed)
+        self.worker.error.connect(self.on_error)
+        self.worker.preview.connect(self.on_preview)
+        self.worker.finished.connect(self._cleanup_worker)  # QThread.finished: run()終了後
+        self.worker.start()
+
+    @_slot_safe
+    def finalize_capture(self):
+        if self.worker:
+            self.worker.finalize()
+            self.btn_finalize.setEnabled(False)
             self.btn_stop.setEnabled(False)
-            QMessageBox.critical(self, "エラー", f"キャプチャ開始に失敗しました:\n{e}")
+            self.label_status.setText("PDF化しています...")
 
+    @_slot_safe
     def stop_capture(self):
         if self.worker:
             self.worker.stop()
+            self.btn_finalize.setEnabled(False)
             self.btn_stop.setEnabled(False)
             self.label_status.setText("停止中...")
 
+    @_slot_safe
     def on_progress(self, current, total, message):
         if total > 0:
             self.progress_bar.setMaximum(total)
             self.progress_bar.setValue(current)
         self.label_status.setText(message)
 
+    @_slot_safe
     def on_preview(self, path):
-        try:
-            pixmap = QPixmap(path)
-            if not pixmap.isNull():
-                scaled = pixmap.scaled(
-                    self.label_preview.size(),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-                self.label_preview.setPixmap(scaled)
-        except Exception:
-            pass
+        pixmap = QPixmap(path)
+        if not pixmap.isNull():
+            scaled = pixmap.scaled(
+                self.label_preview.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.label_preview.setPixmap(scaled)
 
+    @_slot_safe
     def on_completed(self, message):
         self.label_status.setText(message)
         self.btn_start.setEnabled(True)
+        self.btn_finalize.setEnabled(False)
         self.btn_stop.setEnabled(False)
 
         if "完了" in message:
             QMessageBox.information(self, "完了", message)
 
+    @_slot_safe
     def on_error(self, message):
         self.label_status.setText("エラー")
         self.btn_start.setEnabled(True)
+        self.btn_finalize.setEnabled(False)
         self.btn_stop.setEnabled(False)
         QMessageBox.critical(self, "エラー", message)
 
+    @_slot_safe
     def _cleanup_worker(self):
         """QThread.finished シグナル: スレッド終了後に安全にクリーンアップ"""
         if self.worker:

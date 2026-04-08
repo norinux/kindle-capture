@@ -21,6 +21,7 @@ app = QApplication.instance() or QApplication(sys.argv)
 from kindle_capture_app import (
     CaptureWorker,
     MainWindow,
+    _slot_safe,
     find_kindle_window,
     images_are_same,
     pngs_to_pdf,
@@ -321,3 +322,178 @@ class TestMainWindow:
             assert win.progress_bar.value() == 5
             assert win.progress_bar.maximum() == 10
             assert win.label_status.text() == "キャプチャ中"
+
+    def test_on_progress_zero_total_does_not_crash(self):
+        """total=0 でもクラッシュしないことを確認"""
+        with patch("kindle_capture_app.find_kindle_window", return_value=None):
+            win = MainWindow()
+            win.on_progress(0, 0, "待機中...")
+            assert win.label_status.text() == "待機中..."
+
+    def test_on_preview_with_invalid_path(self):
+        """存在しない画像パスでもクラッシュしないことを確認"""
+        with patch("kindle_capture_app.find_kindle_window", return_value=None):
+            win = MainWindow()
+            # _slot_safe が例外をキャッチするのでクラッシュしない
+            win.on_preview("/nonexistent/path/image.png")
+
+    def test_cleanup_worker_when_none(self):
+        """worker が None のときに _cleanup_worker を呼んでもクラッシュしない"""
+        with patch("kindle_capture_app.find_kindle_window", return_value=None):
+            win = MainWindow()
+            assert win.worker is None
+            win._cleanup_worker()  # should not raise
+
+    def test_finalize_capture_when_no_worker(self):
+        """worker が None のときに finalize_capture を呼んでもクラッシュしない"""
+        with patch("kindle_capture_app.find_kindle_window", return_value=None):
+            win = MainWindow()
+            win.finalize_capture()  # should not raise
+
+    def test_stop_capture_when_no_worker(self):
+        """worker が None のときに stop_capture を呼んでもクラッシュしない"""
+        with patch("kindle_capture_app.find_kindle_window", return_value=None):
+            win = MainWindow()
+            win.stop_capture()  # should not raise
+
+    def test_all_slots_have_slot_safe(self):
+        """全スロットメソッドが _slot_safe で保護されていることを確認"""
+        slot_methods = [
+            "browse_output", "detect_kindle", "start_capture",
+            "finalize_capture", "stop_capture", "on_progress",
+            "on_preview", "on_completed", "on_error", "_cleanup_worker",
+        ]
+        with patch("kindle_capture_app.find_kindle_window", return_value=None):
+            win = MainWindow()
+            for name in slot_methods:
+                method = getattr(win, name)
+                # _slot_safe wraps with functools.wraps, so __wrapped__ exists
+                assert hasattr(method, "__wrapped__"), (
+                    f"{name} is not protected by @_slot_safe"
+                )
+
+
+# ── ユニットテスト: _slot_safe デコレータ ──
+
+
+class TestSlotSafe:
+    def test_normal_return_value(self):
+        """例外なしの場合、戻り値がそのまま返る"""
+        @_slot_safe
+        def good_func():
+            return 42
+
+        assert good_func() == 42
+
+    def test_catches_exception(self):
+        """例外が発生してもクラッシュしない（None を返す）"""
+        @_slot_safe
+        def bad_func():
+            raise ValueError("test error")
+
+        with patch("kindle_capture_app.QMessageBox"):
+            result = bad_func()
+        assert result is None  # 例外時は None
+
+    def test_preserves_function_name(self):
+        """functools.wraps で関数名が保持される"""
+        @_slot_safe
+        def my_slot():
+            pass
+
+        assert my_slot.__name__ == "my_slot"
+
+    def test_exception_writes_to_stderr(self, capsys):
+        """例外発生時に stderr にトレースバックが出力される"""
+        @_slot_safe
+        def failing_func():
+            raise RuntimeError("detailed error message")
+
+        with patch("kindle_capture_app.QMessageBox"):
+            failing_func()
+
+        captured = capsys.readouterr()
+        assert "detailed error message" in captured.err
+        assert "RuntimeError" in captured.err
+
+    def test_passes_args_and_kwargs(self):
+        """引数が正しく渡される"""
+        @_slot_safe
+        def add(a, b, extra=0):
+            return a + b + extra
+
+        assert add(1, 2, extra=3) == 6
+
+
+# ── ユニットテスト: CaptureWorker のシグナル接続 ──
+
+
+class TestCaptureWorkerSignals:
+    def test_finalize_sets_both_flags(self):
+        """finalize() は _stop_requested と _finalize_requested の両方を設定する"""
+        worker = CaptureWorker(
+            pages=10, start_page=1, direction="right",
+            delay=1.0, out_dir="/tmp/test", output_pdf="/tmp/test/out.pdf",
+        )
+        assert worker._finalize_requested is False
+        worker.finalize()
+        assert worker._stop_requested is True
+        assert worker._finalize_requested is True
+
+    def test_worker_run_no_kindle(self, tmp_path):
+        """Kindle が見つからない場合、error シグナルが発行される"""
+        errors = []
+        worker = CaptureWorker(
+            pages=5, start_page=1, direction="right",
+            delay=0.1, out_dir=str(tmp_path / "out"),
+            output_pdf=str(tmp_path / "out" / "test.pdf"),
+        )
+        worker.error.connect(errors.append)
+
+        with patch("kindle_capture_app.find_kindle_window", return_value=None):
+            worker.run()
+
+        assert len(errors) == 1
+        assert "Kindle" in errors[0]
+
+    def test_worker_run_capture_fails(self, tmp_path):
+        """キャプチャが失敗した場合、error シグナルが発行される"""
+        errors = []
+        mock_win = {"id": 1, "width": 800, "height": 600, "name": "Test"}
+        worker = CaptureWorker(
+            pages=1, start_page=1, direction="right",
+            delay=0.1, out_dir=str(tmp_path / "out"),
+            output_pdf=str(tmp_path / "out" / "test.pdf"),
+        )
+        worker.error.connect(errors.append)
+
+        with patch("kindle_capture_app.find_kindle_window", return_value=mock_win), \
+             patch("kindle_capture_app.capture_window", side_effect=RuntimeError("画面のキャプチャに失敗")):
+            worker.run()
+
+        assert len(errors) == 1
+        assert "キャプチャ" in errors[0]
+
+    def test_worker_stop_during_capture(self, tmp_path):
+        """キャプチャ中に stop() を呼ぶと中断される"""
+        messages = []
+        mock_win = {"id": 1, "width": 800, "height": 600, "name": "Test"}
+
+        worker = CaptureWorker(
+            pages=100, start_page=1, direction="right",
+            delay=0.0, out_dir=str(tmp_path / "out"),
+            output_pdf=str(tmp_path / "out" / "test.pdf"),
+        )
+        worker.completed.connect(messages.append)
+
+        def fake_capture(wid, path):
+            Image.new("RGB", (100, 100), "red").save(path)
+            worker.stop()  # 1ページ目キャプチャ後に即停止
+
+        with patch("kindle_capture_app.find_kindle_window", return_value=mock_win), \
+             patch("kindle_capture_app.capture_window", side_effect=fake_capture), \
+             patch("kindle_capture_app.time.sleep"):
+            worker.run()
+
+        assert len(messages) == 1
+        assert "中断" in messages[0]

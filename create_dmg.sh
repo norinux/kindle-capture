@@ -10,8 +10,16 @@ DMG_DIR="dist/dmg"
 DMG_OUTPUT="dist/${DMG_NAME}-${VERSION}.dmg"
 
 if [ ! -d "$APP_PATH" ]; then
-    echo "エラー: ${APP_PATH} が見つかりません。先に py2app でビルドしてください。"
+    echo "エラー: ${APP_PATH} が見つかりません。先に ./build.sh でビルドしてください。"
     exit 1
+fi
+
+# 署名チェック
+SIGN_INFO=$(codesign -dvvv "$APP_PATH" 2>&1 | grep "Signature=" || true)
+if echo "$SIGN_INFO" | grep -q "adhoc"; then
+    echo "⚠ 警告: ad-hoc 署名です。アップデート時に権限の再許可が必要になります。"
+    echo "  ./build.sh --setup で証明書を作成してから ./build.sh でビルドしてください。"
+    echo ""
 fi
 
 echo "=== DMG 作成中 ==="
