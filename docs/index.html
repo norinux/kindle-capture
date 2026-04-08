@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kindle Capture - Kindle本をPDFに変換</title>
+    <meta name="description" content="Kindle本のページを自動キャプチャしてPDFに変換するmacOSデスクトップアプリ">
+    <link rel="icon" type="image/png" href="icon-128.png">
+    <style>
+        :root {
+            --bg: #0a0a0a;
+            --surface: #161616;
+            --surface-hover: #1e1e1e;
+            --border: #2a2a2a;
+            --text: #e8e8e8;
+            --text-muted: #888;
+            --accent: #007AFF;
+            --accent-hover: #0062d1;
+            --orange: #FF9500;
+            --green: #34C759;
+            --red: #FF3B30;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ── Hero ── */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -40%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;
+            height: 800px;
+            background: radial-gradient(circle, rgba(0,122,255,0.08) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .hero-icon {
+            width: 128px;
+            height: 128px;
+            border-radius: 28px;
+            margin-bottom: 2rem;
+            filter: drop-shadow(0 8px 32px rgba(0,122,255,0.3));
+            animation: float 6s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-8px); }
+        }
+
+        .hero h1 {
+            font-size: clamp(2.5rem, 6vw, 4rem);
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #fff 0%, #ccc 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero .tagline {
+            font-size: clamp(1.1rem, 2.5vw, 1.4rem);
+            color: var(--text-muted);
+            max-width: 600px;
+            margin-bottom: 2.5rem;
+        }
+
+        .cta-group {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.85rem 2rem;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.2s;
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+        .btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); }
+
+        .btn-secondary {
+            background: var(--surface);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+        .btn-secondary:hover { background: var(--surface-hover); transform: translateY(-1px); }
+
+        .scroll-hint {
+            position: absolute;
+            bottom: 2rem;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            animation: bounce 2s ease-in-out infinite;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); opacity: 0.5; }
+            50% { transform: translateY(6px); opacity: 1; }
+        }
+
+        /* ── Sections ── */
+        section {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 5rem 2rem;
+        }
+
+        .section-title {
+            font-size: 2rem;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .section-subtitle {
+            text-align: center;
+            color: var(--text-muted);
+            margin-bottom: 3rem;
+            font-size: 1.05rem;
+        }
+
+        /* ── Flow ── */
+        .flow {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-bottom: 4rem;
+        }
+
+        .flow-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 1.5rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            width: 160px;
+            text-align: center;
+            transition: border-color 0.3s;
+        }
+        .flow-step:hover { border-color: var(--accent); }
+
+        .flow-step .icon { font-size: 2.5rem; }
+        .flow-step .label { font-weight: 600; font-size: 0.95rem; }
+        .flow-step .desc { font-size: 0.8rem; color: var(--text-muted); }
+
+        .flow-arrow {
+            font-size: 1.5rem;
+            color: var(--text-muted);
+        }
+
+        /* ── Features ── */
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .feature {
+            padding: 1.8rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            transition: border-color 0.3s, transform 0.2s;
+        }
+        .feature:hover { border-color: var(--accent); transform: translateY(-2px); }
+
+        .feature .icon {
+            font-size: 1.8rem;
+            margin-bottom: 0.8rem;
+        }
+
+        .feature h3 {
+            font-size: 1.1rem;
+            margin-bottom: 0.4rem;
+        }
+
+        .feature p {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+
+        /* ── Steps ── */
+        .steps {
+            display: grid;
+            gap: 1.5rem;
+            counter-reset: step;
+        }
+
+        .step {
+            display: grid;
+            grid-template-columns: 48px 1fr;
+            gap: 1rem;
+            align-items: start;
+            padding: 1.5rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            counter-increment: step;
+        }
+
+        .step-num {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 1.2rem;
+            flex-shrink: 0;
+        }
+
+        .step-num::before { content: counter(step); }
+
+        .step h3 { font-size: 1.05rem; margin-bottom: 0.3rem; }
+        .step p { font-size: 0.9rem; color: var(--text-muted); }
+
+        .step code {
+            display: inline-block;
+            background: #1a1a2e;
+            color: var(--accent);
+            padding: 0.15rem 0.5rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-family: "SF Mono", "Menlo", monospace;
+            margin-top: 0.3rem;
+        }
+
+        /* ── Requirements ── */
+        .req-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        .req-item {
+            padding: 1.2rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .req-item .icon { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .req-item .label { font-weight: 600; font-size: 0.95rem; }
+        .req-item .value { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem; }
+
+        /* ── Permissions ── */
+        .permissions {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background: linear-gradient(135deg, rgba(255,149,0,0.05), rgba(255,59,48,0.05));
+            border: 1px solid rgba(255,149,0,0.2);
+            border-radius: 16px;
+        }
+
+        .permissions h3 {
+            font-size: 1.1rem;
+            margin-bottom: 0.8rem;
+            color: var(--orange);
+        }
+
+        .perm-list {
+            list-style: none;
+            display: grid;
+            gap: 0.6rem;
+        }
+
+        .perm-list li {
+            display: flex;
+            align-items: start;
+            gap: 0.6rem;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        .perm-list li::before {
+            content: '🔒';
+            flex-shrink: 0;
+        }
+
+        /* ── Legal ── */
+        .legal-section {
+            border-top: 1px solid var(--border);
+        }
+
+        .legal-notice {
+            padding: 2rem;
+            background: linear-gradient(135deg, rgba(255,59,48,0.04), rgba(255,149,0,0.04));
+            border: 1px solid rgba(255,59,48,0.15);
+            border-radius: 16px;
+            margin-bottom: 2rem;
+        }
+
+        .legal-notice h3 {
+            color: var(--red);
+            font-size: 1.1rem;
+            margin-bottom: 0.8rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .legal-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .legal-card {
+            padding: 1.5rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+        }
+
+        .legal-card h3 {
+            font-size: 1.05rem;
+            margin-bottom: 0.6rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .legal-card p, .legal-card li {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            line-height: 1.7;
+        }
+
+        .legal-card ul {
+            list-style: none;
+            margin-top: 0.5rem;
+        }
+
+        .legal-card ul li {
+            padding: 0.3rem 0;
+            padding-left: 1.2rem;
+            position: relative;
+        }
+
+        .legal-card ul li::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0.75rem;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--text-muted);
+        }
+
+        .legal-card .ok li::before { background: var(--green); }
+        .legal-card .ng li::before { background: var(--red); }
+
+        .legal-card .tag {
+            display: inline-block;
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 0.15rem 0.5rem;
+            border-radius: 6px;
+            margin-right: 0.3rem;
+        }
+        .tag-ok { background: rgba(52,199,89,0.15); color: var(--green); }
+        .tag-ng { background: rgba(255,59,48,0.15); color: var(--red); }
+
+        .disclaimer {
+            padding: 1.5rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            line-height: 1.8;
+        }
+
+        .disclaimer h3 {
+            font-size: 1rem;
+            color: var(--text);
+            margin-bottom: 0.6rem;
+        }
+
+        /* ── Footer ── */
+        footer {
+            text-align: center;
+            padding: 3rem 2rem;
+            border-top: 1px solid var(--border);
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+
+        footer a { color: var(--accent); text-decoration: none; }
+        footer a:hover { text-decoration: underline; }
+
+        /* ── Responsive ── */
+        @media (max-width: 640px) {
+            .flow { gap: 0.5rem; }
+            .flow-step { width: 120px; padding: 1rem; }
+            .flow-arrow { display: none; }
+            .step { grid-template-columns: 40px 1fr; }
+            .step-num { width: 40px; height: 40px; font-size: 1rem; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Hero -->
+<div class="hero">
+    <img src="icon-128.png" alt="Kindle Capture" class="hero-icon">
+    <h1>Kindle Capture</h1>
+    <p class="tagline">Kindle本のページを自動キャプチャして<br>1つのPDFにまとめる macOS アプリ</p>
+    <div class="cta-group">
+        <a href="https://github.com/norinux/kindle-capture/releases/latest" class="btn btn-primary">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            ダウンロード
+        </a>
+        <a href="https://github.com/norinux/kindle-capture" class="btn btn-secondary">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+            GitHub
+        </a>
+    </div>
+    <div class="scroll-hint">&#8595; スクロールして詳細を見る</div>
+</div>
+
+<!-- How it works -->
+<section>
+    <h2 class="section-title">仕組み</h2>
+    <p class="section-subtitle">3ステップで Kindle本 を PDF に変換</p>
+    <div class="flow">
+        <div class="flow-step">
+            <div class="icon">📖</div>
+            <div class="label">Kindle で本を開く</div>
+            <div class="desc">読みたいページを表示</div>
+        </div>
+        <div class="flow-arrow">&#8594;</div>
+        <div class="flow-step">
+            <div class="icon">📸</div>
+            <div class="label">自動キャプチャ</div>
+            <div class="desc">ページ送り＋スクショ</div>
+        </div>
+        <div class="flow-arrow">&#8594;</div>
+        <div class="flow-step">
+            <div class="icon">📄</div>
+            <div class="label">PDF 出力</div>
+            <div class="desc">1つのPDFにまとめる</div>
+        </div>
+    </div>
+</section>
+
+<!-- Features -->
+<section>
+    <h2 class="section-title">特徴</h2>
+    <p class="section-subtitle">シンプルで確実なキャプチャ</p>
+    <div class="features">
+        <div class="feature">
+            <div class="icon">🎯</div>
+            <h3>ウィンドウ直接キャプチャ</h3>
+            <p>Quartz API でウィンドウを直接キャプチャ。他のウィンドウに隠れていてもOK。</p>
+        </div>
+        <div class="feature">
+            <div class="icon">🔄</div>
+            <h3>自動ページ送り</h3>
+            <p>AppleScript でページ送りを自動化。待ち時間は自由に調整可能。</p>
+        </div>
+        <div class="feature">
+            <div class="icon">🧠</div>
+            <h3>ページ変更検出</h3>
+            <p>ピクセル比較でページが実際に変わったことを確認してからキャプチャ。</p>
+        </div>
+        <div class="feature">
+            <div class="icon">📄</div>
+            <h3>途中でPDF化</h3>
+            <p>キャプチャ途中でも取得済みページからPDFを生成。全ページ待つ必要なし。</p>
+        </div>
+        <div class="feature">
+            <div class="icon">👁</div>
+            <h3>リアルタイムプレビュー</h3>
+            <p>キャプチャ中のページをリアルタイムで確認。進捗バーで残りページも把握。</p>
+        </div>
+        <div class="feature">
+            <div class="icon">🔐</div>
+            <h3>権限が持続する署名</h3>
+            <p>コード署名により、アップデート後もプライバシー権限の再設定が不要。</p>
+        </div>
+    </div>
+</section>
+
+<!-- Install -->
+<section>
+    <h2 class="section-title">インストール</h2>
+    <p class="section-subtitle">ソースからビルド</p>
+    <div class="steps">
+        <div class="step">
+            <div class="step-num"></div>
+            <div>
+                <h3>リポジトリをクローン</h3>
+                <code>git clone https://github.com/norinux/kindle-capture.git</code>
+            </div>
+        </div>
+        <div class="step">
+            <div class="step-num"></div>
+            <div>
+                <h3>依存関係をインストール</h3>
+                <code>python3 -m venv .venv && .venv/bin/pip install PyQt6 Pillow pyobjc-framework-Quartz pyobjc-framework-Cocoa py2app</code>
+            </div>
+        </div>
+        <div class="step">
+            <div class="step-num"></div>
+            <div>
+                <h3>署名用証明書を作成（初回のみ）</h3>
+                <p>アップデート時の権限再設定を不要にします</p>
+                <code>./build.sh --setup</code>
+            </div>
+        </div>
+        <div class="step">
+            <div class="step-num"></div>
+            <div>
+                <h3>ビルド & インストール</h3>
+                <code>./build.sh && cp -R "dist/Kindle Capture.app" /Applications/</code>
+            </div>
+        </div>
+    </div>
+
+    <div class="permissions">
+        <h3>必要な権限</h3>
+        <ul class="perm-list">
+            <li><strong>画面収録</strong> &#8212; Kindleウィンドウのスクリーンショット撮影に必要</li>
+            <li><strong>アクセシビリティ</strong> &#8212; キーボード操作によるページ送りに必要</li>
+        </ul>
+    </div>
+</section>
+
+<!-- Requirements -->
+<section>
+    <h2 class="section-title">動作環境</h2>
+    <p class="section-subtitle"></p>
+    <div class="req-grid">
+        <div class="req-item">
+            <div class="icon">💻</div>
+            <div class="label">macOS</div>
+            <div class="value">13 Ventura 以降</div>
+        </div>
+        <div class="req-item">
+            <div class="icon">🐍</div>
+            <div class="label">Python</div>
+            <div class="value">3.12+</div>
+        </div>
+        <div class="req-item">
+            <div class="icon">📚</div>
+            <div class="label">Kindle</div>
+            <div class="value">macOS版 Kindleアプリ</div>
+        </div>
+        <div class="req-item">
+            <div class="icon">🖥</div>
+            <div class="label">アーキテクチャ</div>
+            <div class="value">Apple Silicon / Intel</div>
+        </div>
+    </div>
+</section>
+
+<!-- Legal -->
+<section class="legal-section" id="legal">
+    <h2 class="section-title">利用上の注意</h2>
+    <p class="section-subtitle">本ツールを使用する前に必ずお読みください</p>
+
+    <div class="legal-notice">
+        <h3>本ツールの利用はすべて自己責任です</h3>
+        <p style="font-size:0.9rem; color:var(--text-muted); line-height:1.8;">
+            Kindle Capture は、購入済みの電子書籍を<strong>個人的なバックアップ・利便性向上</strong>の目的で
+            スクリーンショットを取得するツールです。
+            DRM（技術的保護手段）の解除・回避を行うものではなく、macOS 標準のスクリーンキャプチャ API を利用しています。
+            ただし、利用にあたっては以下の法的事項をご理解のうえ、ご自身の判断と責任でお使いください。
+        </p>
+    </div>
+
+    <div class="legal-cards">
+        <div class="legal-card">
+            <h3>著作権法（私的使用のための複製）</h3>
+            <p>
+                日本の著作権法 第30条は、<strong>個人的に又は家庭内その他これに準ずる限られた範囲内</strong>で使用する場合の複製を認めています。
+                ただし、以下の条件があります：
+            </p>
+            <ul class="ok">
+                <li>自分が購入・ライセンスを取得した書籍であること</li>
+                <li>個人的な閲覧・学習目的であること</li>
+                <li>家庭内など限られた範囲での利用であること</li>
+            </ul>
+            <p style="margin-top:0.8rem; font-size:0.85rem;">
+                <span class="tag tag-ok">注</span>
+                本ツールは DRM を技術的に解除・回避するものではありません（著作権法 第30条第1項第2号の「技術的保護手段の回避」には該当しない設計です）。
+                画面に表示された内容のスクリーンショットを取得する仕組みです。
+            </p>
+        </div>
+
+        <div class="legal-card">
+            <h3>Kindle 利用規約との関係</h3>
+            <p>
+                Amazon Kindle の利用規約では、コンテンツの複製・再配布を制限する条項が含まれています。
+                本ツールの使用が規約に抵触する可能性があることをご理解ください。
+            </p>
+            <ul class="ng">
+                <li>生成した PDF を第三者に配布・共有・販売すること</li>
+                <li>インターネット上にアップロードすること</li>
+                <li>購入していない書籍に対して使用すること</li>
+            </ul>
+            <ul class="ok">
+                <li>自分が購入した書籍の個人的なバックアップ</li>
+                <li>オフライン環境での個人的な閲覧</li>
+                <li>アクセシビリティ目的での形式変換（視覚支援ツールとの併用など）</li>
+            </ul>
+        </div>
+
+        <div class="legal-card">
+            <h3>想定される利用場面</h3>
+            <p>本ツールは以下のような個人的な利用場面を想定しています：</p>
+            <ul class="ok">
+                <li><strong>端末移行時のバックアップ</strong> &#8212; Kindle アプリが対応していない環境への移行</li>
+                <li><strong>オフライン閲覧</strong> &#8212; ネットワーク接続がない環境での個人的な参照</li>
+                <li><strong>学習・研究用途</strong> &#8212; 購入した技術書への書き込み・注釈の追加</li>
+                <li><strong>アクセシビリティ</strong> &#8212; PDF対応の読み上げソフト・拡大ツールとの併用</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="disclaimer">
+        <h3>免責事項</h3>
+        <p>
+            本ソフトウェアは「現状のまま（AS IS）」で提供されます。
+            開発者は、本ツールの使用によって生じたいかなる損害（アカウントの制限・停止、法的問題を含む）について一切の責任を負いません。
+            利用者は、自国・地域の法令および利用中のサービスの規約を確認し、自己の責任において使用してください。
+            本ツールは著作権侵害や不正利用を助長する目的で開発されたものではありません。
+        </p>
+    </div>
+</section>
+
+<!-- Footer -->
+<footer>
+    <p>
+        Kindle Capture は <a href="https://github.com/norinux/kindle-capture">オープンソース</a> です
+        &nbsp;|&nbsp;
+        <a href="https://github.com/norinux/kindle-capture/releases">リリース一覧</a>
+        &nbsp;|&nbsp;
+        <a href="https://github.com/norinux/kindle-capture/issues">バグ報告</a>
+    </p>
+</footer>
+
+</body>
+</html>
