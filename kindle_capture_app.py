@@ -60,11 +60,16 @@ def _slot_safe(func):
     各スロットを明示的に保護する必要がある。
     """
     from functools import wraps
+    import inspect
+    sig = inspect.signature(func)
+    n_params = len(sig.parameters)
 
     @wraps(func)
     def wrapper(*args, **kwargs):
         try:
-            return func(*args, **kwargs)
+            # PyQt6 のシグナルが余分な引数を渡す場合（例: clicked(bool)）に
+            # 関数の引数数に合わせて切り捨てる
+            return func(*args[:n_params], **kwargs)
         except Exception as e:
             msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
             sys.stderr.write(msg)
